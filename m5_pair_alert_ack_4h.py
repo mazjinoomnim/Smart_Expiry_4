@@ -9,7 +9,7 @@ import urequests
 
 WIFI_NAME = 'YOUR_WIFI_NAME'
 WIFI_PASSWORD = 'YOUR_WIFI_PASSWORD'
-WORKER_URL = 'https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev'
+WORKER_URL = 'https://smart-expiry-device-api.manatsawee-a.workers.dev'
 
 M5.begin()
 M5.Lcd.fillScreen(0x101820)
