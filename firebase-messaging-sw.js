@@ -10,9 +10,15 @@ firebase.initializeApp({
 });
 const messaging=firebase.messaging();
 messaging.onBackgroundMessage(payload=>{
- // FCM HTTP v1 sends a data-only payload; show exactly one notification here.
+ // Notification payloads are displayed by Firebase automatically.
+ // Keep a fallback for any older data-only messages, avoiding duplicate banners.
+ if(payload.notification)return;
  const data=payload.data||{};
- self.registration.showNotification(data.title||'SmartExpiry',{body:data.body||'Check your products',icon:'./icon-192.png',badge:'./icon-192.png',tag:data.tag||'smart-expiry',data:{url:'./?ack=1'}});
+ if(!data.title && !data.body)return;
+ self.registration.showNotification(data.title||'SmartExpiry',{
+  body:data.body||'Check your products',icon:'./icon-192.png',
+  badge:'./icon-192.png',tag:data.tag||'smart-expiry',data:{url:'./?ack=1'}
+ });
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();
