@@ -1,6 +1,6 @@
 import { DEVICE_API_URL } from './device-config.js';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
 import { getMessaging, getToken, isSupported, deleteToken } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js';
@@ -164,7 +164,16 @@ $('qrFile').addEventListener('change',async e=>{
  finally{e.target.value=''}
 });
 
-$('loginBtn').onclick=async()=>{if(!configured){notice('First configure firebase-config.js with your Firebase Web app settings.');return}try{const provider=new GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});await signInWithPopup(auth,provider)}catch(e){notice('Google sign-in failed: '+e.message)}};
+$('loginBtn').onclick=async()=>{
+ if(!configured){notice('First configure firebase-config.js with your Firebase Web app settings.');return}
+ try{
+  const remember=$('rememberLogin').checked;
+  await setPersistence(auth,remember?browserLocalPersistence:browserSessionPersistence);
+  const provider=new GoogleAuthProvider();
+  if(!remember)provider.setCustomParameters({prompt:'select_account'});
+  await signInWithPopup(auth,provider);
+ }catch(e){notice('Google sign-in failed: '+e.message)}
+};
 $('logoutBtn').onclick=async()=>{try{await signOut(auth)}catch(e){notice(e.message)}};
 showAuth();$('loginHeading').textContent='Checking your account…';$('loginBtn').disabled=true;if(!configured){$('loginHeading').textContent='Welcome to SmartExpiry';$('loginBtn').disabled=false;notice('Setup needed: edit firebase-config.js, then enable Google Sign-in and Firestore in Firebase Console.')}else{try{const app=initializeApp(firebaseConfig);firebaseApp=app;auth=getAuth(app);db=getFirestore(app);onAuthStateChanged(auth,u=>{ $('loginBtn').disabled=false;if(unsubscribe){unsubscribe();unsubscribe=null}if(u)showSignedIn(u);else showAuth()},e=>{showAuth();notice('Authentication error: '+e.message)})}catch(e){notice('Firebase setup error: '+e.message)}}
 
