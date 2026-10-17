@@ -15,6 +15,9 @@ let messaging=null;
 let qrScanner=null,scannerBusy=false,scannerDone=false,qrLibraryPromise=null;
 const urlProduct=(new URLSearchParams(location.search).get('product')||'').toLowerCase().trim();
 const validQrProduct=!!catalog[urlProduct];
+// Preserve QR link before showList clears the query string.
+const incomingQRLink = new URLSearchParams(location.search).has('data') || (new URLSearchParams(location.search).has('name') && new URLSearchParams(location.search).has('exp')) ? location.href : null;
+let incomingQRHandled = false;
 const productById=id=>products[id]||catalog[id];
 const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(msg){$('notice').hidden=!msg;$('notice').textContent=msg||''}
@@ -31,7 +34,9 @@ function showAuth(){user=null;tracked=[];products={};pairedDevices=[];
 $('loginHeading').textContent=validQrProduct?'Sign in to track '+catalog[urlProduct].name:'Welcome to SmartExpiry';
 $('loginDescription').textContent=validQrProduct?'Your QR code is ready. Continue with Google to view the product and choose whether to add it.':'New here? Continue with Google to register automatically. Returning users can sign in with the same Google account.';
 $('loginBtn').textContent='Continue with Google';$('loginPage').hidden=false;$('scanDock').hidden=true;$('listPage').hidden=true;$('detailPage').hidden=true;$('accountBar').hidden=true;$('count').textContent='0';$('nav').hidden=true}
-function showSignedIn(u){user=u;void loadDevices();$('loginPage').hidden=true;$('accountBar').hidden=false;$('accountName').textContent=u.displayName||u.email||'Signed in';$('nav').hidden=false;notice('');if(validQrProduct)showDetail(urlProduct);else showList();unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data();const base=catalog[d.id]||{};if(typeof v.name==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v.exp||'')){products[d.id]={...base,...v,id:d.id}}else if(catalog[d.id])products[d.id]=catalog[d.id]});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
+function showSignedIn(u){user=u;void loadDevices();$('loginPage').hidden=true;$('accountBar').hidden=false;$('accountName').textContent=u.displayName||u.email||'Signed in';$('nav').hidden=false;notice('');if(validQrProduct && !incomingQRLink)showDetail(urlProduct);else showList();
+if(incomingQRLink && !incomingQRHandled){incomingQRHandled=true;void saveScannedQR(incomingQRLink).catch(e=>notice('Could not add QR product: '+e.message));}
+unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data();const base=catalog[d.id]||{};if(typeof v.name==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v.exp||'')){products[d.id]={...base,...v,id:d.id}}else if(catalog[d.id])products[d.id]=catalog[d.id]});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
 
 // QR can carry a complete product record; legacy catalog QR IDs remain supported.
 function validDate(v){
