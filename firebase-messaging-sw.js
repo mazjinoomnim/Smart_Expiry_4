@@ -12,9 +12,9 @@ const messaging=firebase.messaging();
 messaging.onBackgroundMessage(payload=>{
  // FCM HTTP v1 sends a data-only payload; show exactly one notification here.
  const data=payload.data||{};
- self.registration.showNotification(data.title||'SmartExpiry',{body:data.body||'Check your products',icon:'./icon-192.png',badge:'./icon-192.png',tag:data.tag||'smart-expiry',data:{url:'./'}});
+ self.registration.showNotification(data.title||'SmartExpiry',{body:data.body||'Check your products',icon:'./icon-192.png',badge:'./icon-192.png',tag:data.tag||'smart-expiry',data:{url:'./?ack=1'}});
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();
- event.waitUntil(clients.openWindow(new URL('./',self.registration.scope).href));
+ event.waitUntil(clients.openWindow(new URL(event.notification.data?.url||'./?ack=1',self.registration.scope).href));
 });

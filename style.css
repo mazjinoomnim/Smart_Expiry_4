@@ -36,3 +36,6 @@
 .compactPanel .pairRow input{min-width:0;padding:10px;font-size:12px}
 .compactPanel .pairRow button{padding:10px 14px;font-size:12px;white-space:nowrap}
 .compactDeviceList{font-size:11px;color:#647d6c;margin:5px 12px 14px!important}
+
+/* Acknowledge button on expired product rows */
+.acknowledgeBtn{display:block;flex:0 0 auto;border:1px solid #247647;border-radius:10px;background:#e8f5ec;color:#205d39;font-weight:700;padding:9px 12px;margin:8px;cursor:pointer}.acknowledgeBtn:disabled{opacity:.75;cursor:default}.item{flex-wrap:wrap}

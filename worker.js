@@ -56,6 +56,7 @@ const sendDailyPush=async env=>{
    const days=dayNumber(item.exp)-dayNumber(today);
    // Notify at 3, 2, 1, 0 days, and once on the first day after expiry.
    if(days>3||days< -1)continue;
+   if(days<=0){const ack=await env.DB.prepare('SELECT 1 FROM acknowledgements WHERE uid=? AND product_id=? AND expiry=?').bind(row.uid,item.id,item.exp).first();if(ack)continue;}
    const title=days<0?`${item.name} has expired`:days===0?`${item.name} expires today`:`${item.name} expires in ${days} day${days===1?'':'s'}`;
    const body=days<0?'Please check this product.':days===0?'Check this product before use.':'Check your SmartExpiry product list.';
    for(const sub of subscriptions.results){
@@ -110,9 +111,26 @@ export default {
    const data=await req.json();const items=data.products;
    if(!Array.isArray(items)||items.length>100)return respond(fail('Invalid product list'));
    const products=[];
-   for(const p of items){if(typeof p.name!=='string'||p.name.length>80||!/^\d{4}-\d{2}-\d{2}$/.test(p.exp)||!Number.isFinite(dayNumber(p.exp)))return respond(fail('Invalid product'));products.push({name:p.name,exp:p.exp})}
+   for(const p of items){if(typeof p.id!=='string'||!p.id||p.id.length>150)return respond(fail('Invalid product ID'));if(typeof p.name!=='string'||p.name.length>80||!/^\d{4}-\d{2}-\d{2}$/.test(p.exp)||!Number.isFinite(dayNumber(p.exp)))return respond(fail('Invalid product'));products.push({id:p.id,name:p.name,exp:p.exp})}
    await env.DB.prepare('UPDATE devices SET products_json=? WHERE owner_uid=?').bind(JSON.stringify(products),uid).run();
    return respond(json({synced:products.length}));
+  }
+  // Per-product acknowledgement is keyed by Firebase UID, product ID and expiry date.
+  if(req.method==='GET'&&p==='/acknowledgements'){
+   const uid=await authUser(req,env);if(!uid)return respond(fail('Sign in first',401));
+   const rows=await env.DB.prepare('SELECT product_id AS id, expiry AS exp FROM acknowledgements WHERE uid=?').bind(uid).all();
+   return respond(json({items:rows.results}));
+  }
+  if(req.method==='POST'&&p==='/acknowledge'){
+   const uid=await authUser(req,env);if(!uid)return respond(fail('Sign in first',401));
+   const data=await req.json();const id=data.productId,exp=data.exp;
+   if(typeof id!=='string'||!id||id.length>150||typeof exp!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(exp)||!Number.isFinite(dayNumber(exp)))return respond(fail('Invalid product'));
+   const row=await env.DB.prepare('SELECT products_json FROM push_products WHERE uid=?').bind(uid).first();
+   const list=JSON.parse(row?.products_json||'[]');
+   if(!list.some(x=>x.id===id&&x.exp===exp))return respond(fail('Product not in your synced list',409));
+   if(dayNumber(exp)>dayNumber(dayUTC7()))return respond(fail('Product is not expired yet',409));
+   await env.DB.prepare('INSERT OR IGNORE INTO acknowledgements(uid,product_id,expiry) VALUES(?,?,?)').bind(uid,id,exp).run();
+   return respond(json({acknowledged:true}));
   }
   // Register a phone's Firebase Cloud Messaging token for the signed-in user.
   if(req.method==='POST'&&p==='/push/subscribe'){
@@ -138,7 +156,10 @@ export default {
   if(req.method==='GET'&&p==='/device/alerts'){
    const d=await getDevice(req,env);if(!d)return respond(fail('Invalid device credentials',401));
    if(!d.owner_uid)return respond(json({paired:false,alerts:[]}));
-   const today=dayUTC7();const alerts=JSON.parse(d.products_json||'[]').map(p=>({...p,daysLeft:dayNumber(p.exp)-dayNumber(today)})).filter(p=>p.daysLeft<=3).sort((a,b)=>a.daysLeft-b.daysLeft);
+   const today=dayUTC7();
+   const acks=await env.DB.prepare('SELECT product_id,expiry FROM acknowledgements WHERE uid=?').bind(d.owner_uid).all();
+   const acknowledged=new Set(acks.results.map(x=>x.product_id+'|'+x.expiry));
+   const alerts=JSON.parse(d.products_json||'[]').map(p=>({...p,daysLeft:dayNumber(p.exp)-dayNumber(today)})).filter(p=>p.daysLeft<=3).map(p=>({...p,acknowledged:acknowledged.has(p.id+'|'+p.exp)})).sort((a,b)=>a.daysLeft-b.daysLeft);
    return respond(json({paired:true,today,alerts}));
   }
   return respond(fail('Not found',404));

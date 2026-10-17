@@ -10,6 +10,8 @@ const $=id=>document.getElementById(id);
 const configured=!!(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
 let auth,db,user=null,unsubscribe=null,tracked=[],products={},filter='all',current=null;
 let pairedDevices=[];
+let acknowledgedIds=new Set();
+let acknowledgeBusy=new Set();
 let pendingProduct=null;
 let firebaseApp=null;
 let messaging=null;
@@ -26,18 +28,26 @@ function daysLeft(exp){const d=new Date(exp+'T00:00:00');const n=new Date(),t=ne
 function state(p){const d=daysLeft(p.exp);return {d,type:d<=0?'expired':d<=3?'soon':'fresh',label:d<=0?'Expired':d<=3?'Expiring soon':'Fresh',days:d<0?`${-d} days ago`:d===0?'Expires today':`${d} days left`}}
 function todayISO(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`}
 function fmt(s){return new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
-function render(){const items=tracked.map(id=>productById(id)).filter(Boolean);$('count').textContent=items.length;const counts={all:items.length,fresh:0,soon:0,expired:0};items.forEach(p=>counts[state(p).type]++);document.querySelectorAll('[data-filter]').forEach(b=>{const k=b.dataset.filter;b.textContent=`${k==='all'?'All':k==='soon'?'Soon':k[0].toUpperCase()+k.slice(1)} ${counts[k]}`;b.classList.toggle('selected',filter===k)});const expired=items.filter(p=>state(p).type==='expired');$('alert').hidden=!expired.length;$('alert').textContent=expired.length?`${expired.map(p=>p.name).join(', ')} expired. Check your paired M5 for alerts.`:'';const list=$('products');list.replaceChildren();const shown=items.filter(p=>filter==='all'||state(p).type===filter);if(!shown.length){list.innerHTML=items.length===0?'<div class="emptyState"><div class="emptyIcon">📦</div><h2>No products yet</h2><p>Scan a SmartExpiry QR code to add a product automatically.</p></div>':'<p class="empty">No products in this category.</p>';return}shown.forEach(p=>{const s=state(p),row=document.createElement('div');row.className='item';const open=document.createElement('button');open.className='productOpen';open.innerHTML=`<div class="emoji">${escapeHTML(p.emoji)}</div><div><div class="name">${escapeHTML(p.name)}</div><div class="exp">EXP ${escapeHTML(fmt(p.exp))}</div></div><div class="itemMeta"><span class="pill ${s.type}">${s.label}</span><div class="daysText">${s.days}</div></div>`;open.onclick=()=>showDetail(p.id);const del=document.createElement('button');del.className='remove';del.textContent='🗑';del.title=`Remove ${p.name}`;del.setAttribute('aria-label',del.title);del.onclick=async()=>{if(!confirm(`Remove ${p.name} from My Products?`))return;try{await deleteDoc(doc(db,'users',user.uid,'products',p.id))}catch(e){notice('Remove failed: '+e.message)}};row.append(open,del);list.append(row)})}
+function render(){const items=tracked.map(id=>productById(id)).filter(Boolean);$('count').textContent=items.length;const counts={all:items.length,fresh:0,soon:0,expired:0};items.forEach(p=>counts[state(p).type]++);document.querySelectorAll('[data-filter]').forEach(b=>{const k=b.dataset.filter;b.textContent=`${k==='all'?'All':k==='soon'?'Soon':k[0].toUpperCase()+k.slice(1)} ${counts[k]}`;b.classList.toggle('selected',filter===k)});const expired=items.filter(p=>state(p).type==='expired');$('alert').hidden=!expired.length;$('alert').textContent=expired.length?`${expired.map(p=>p.name).join(', ')} expired. Check your paired M5 for alerts.`:'';const list=$('products');list.replaceChildren();const shown=items.filter(p=>filter==='all'||state(p).type===filter);if(!shown.length){list.innerHTML=items.length===0?'<div class="emptyState"><div class="emptyIcon">📦</div><h2>No products yet</h2><p>Scan a SmartExpiry QR code to add a product automatically.</p></div>':'<p class="empty">No products in this category.</p>';return}shown.forEach(p=>{const s=state(p),row=document.createElement('div');row.className='item';const open=document.createElement('button');open.className='productOpen';open.innerHTML=`<div class="emoji">${escapeHTML(p.emoji)}</div><div><div class="name">${escapeHTML(p.name)}</div><div class="exp">EXP ${escapeHTML(fmt(p.exp))}</div></div><div class="itemMeta"><span class="pill ${s.type}">${s.label}</span><div class="daysText">${s.days}</div></div>`;open.onclick=()=>showDetail(p.id);const del=document.createElement('button');del.className='remove';del.textContent='🗑';del.title=`Remove ${p.name}`;del.setAttribute('aria-label',del.title);del.onclick=async()=>{if(!confirm(`Remove ${p.name} from My Products?`))return;try{await deleteDoc(doc(db,'users',user.uid,'products',p.id))}catch(e){notice('Remove failed: '+e.message)}};row.append(open,del);
+if(s.type==='expired'){
+ const ack=document.createElement('button');ack.type='button';ack.className='acknowledgeBtn';
+ const acknowledged=acknowledgedIds.has(p.id);ack.textContent=acknowledged?'Acknowledged ✓':'Acknowledge';
+ ack.disabled=acknowledged||acknowledgeBusy.has(p.id);
+ ack.onclick=async()=>{if(!user||ack.disabled)return;acknowledgeBusy.add(p.id);ack.disabled=true;ack.textContent='Saving...';try{await deviceRequest('/acknowledge','POST',{productId:p.id,exp:p.exp});acknowledgedIds.add(p.id);render();notice(p.name+' acknowledged. M5 will stop repeating this alert after its next sync.')}catch(e){notice('Acknowledge failed: '+e.message);render()}finally{acknowledgeBusy.delete(p.id)}};
+ row.append(ack);
+}
+list.append(row)})}
 function showList(){pendingProduct=null;closeScanner();current=null;$('listPage').hidden=false;$('detailPage').hidden=true;history.replaceState(null,'',location.pathname);$('scanDock').hidden=!user;render()}
 function showDetail(id){const p=productById(id);if(!p)return;closeScanner();$('scanDock').hidden=true;current=id;$('listPage').hidden=true;$('detailPage').hidden=false;$('detailEmoji').textContent=p.emoji;$('detailName').textContent=p.name;$('detailCategory').textContent=p.category;$('detailMfg').textContent=fmt(p.mfg);$('detailExp').textContent=fmt(p.exp);$('todayDate').textContent=fmt(todayISO());const s=state(p);$('detailDays').textContent=Math.abs(s.d);$('detailUnit').textContent=s.d<0?'days past expiry':s.d===0?'expires today':'days remaining';$('detailStatus').textContent=s.label.toUpperCase();$('detailStatus').className=`pill ${s.type}`;$('statusBox').style.background=s.type==='fresh'?'#e4f3e9':s.type==='soon'?'#fff2d4':'#fae5e3';$('addBtn').textContent=tracked.includes(id)?'Already Added ✓':'Add to My Products';$('addBtn').disabled=tracked.includes(id)}
 $('addBtn').onclick=async()=>{if(!current||!user)return;const id=current,p=productById(id);if(!p)return;$('addBtn').disabled=true;try{await setDoc(doc(db,'users',user.uid,'products',id),{productId:id,name:p.name,emoji:p.emoji,category:p.category||'Scanned product',mfg:p.mfg,exp:p.exp,addedAt:serverTimestamp()});pendingProduct=null;showList();notice(p.name+' added to My Products ✓')}catch(e){notice('Could not save product: '+e.message);$('addBtn').disabled=false}};
 $('backBtn').onclick=showList;$('nav').onclick=showList;document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;render()});
-function showAuth(){user=null;tracked=[];products={};pairedDevices=[];
+function showAuth(){user=null;tracked=[];products={};pairedDevices=[];acknowledgedIds=new Set();
 $('loginHeading').textContent=validQrProduct?'Sign in to track '+catalog[urlProduct].name:'Welcome to SmartExpiry';
 $('loginDescription').textContent=validQrProduct?'Your QR code is ready. Continue with Google to view the product and choose whether to add it.':'New here? Continue with Google to register automatically. Returning users can sign in with the same Google account.';
 $('loginBtn').textContent='Continue with Google';$('loginPage').hidden=false;$('scanDock').hidden=true;$('listPage').hidden=true;$('detailPage').hidden=true;$('accountBar').hidden=true;$('count').textContent='0';$('nav').hidden=true}
 function showSignedIn(u){user=u;void loadDevices();$('loginPage').hidden=true;$('accountBar').hidden=false;$('accountName').textContent=u.displayName||u.email||'Signed in';$('nav').hidden=false;notice('');if(validQrProduct && !incomingQRLink)showDetail(urlProduct);else showList();
 if(incomingQRLink && !incomingQRHandled){incomingQRHandled=true;void previewScannedQR(incomingQRLink).catch(e=>notice('Could not open QR product: '+e.message));}
-unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data()||{};const base=catalog[d.id]||{};const merged={...base,...v,id:d.id};if(typeof merged.name==='string'&&validDate(merged.exp)){merged.mfg=validDate(merged.mfg)?merged.mfg:merged.exp;merged.emoji=merged.emoji||'📦';products[d.id]=merged}});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
+unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data()||{};const base=catalog[d.id]||{};const merged={...base,...v,id:d.id};if(typeof merged.name==='string'&&validDate(merged.exp)){merged.mfg=validDate(merged.mfg)?merged.mfg:merged.exp;merged.emoji=merged.emoji||'📦';products[d.id]=merged}});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();void loadAcknowledgements();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
 
 // QR can carry a complete product record; legacy catalog QR IDs remain supported.
 function validDate(v){
@@ -191,6 +201,14 @@ async function deviceRequest(path,method='GET',body){
  const response=await fetch(DEVICE_API_URL.replace(/\/$/,'')+path,{method,headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
  const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');return result;
 }
+async function loadAcknowledgements(){
+ if(!user||!DEVICE_API_URL)return;
+ const uid=user.uid;
+ try{const result=await deviceRequest('/acknowledgements');if(!user||user.uid!==uid)return;
+ acknowledgedIds=new Set((result.items||[]).filter(a=>products[a.id]&&products[a.id].exp===a.exp).map(a=>a.id));
+ render();
+ }catch(e){console.warn('Acknowledge sync:',e.message)}
+}
 async function loadDevices(){
  if(!user||!DEVICE_API_URL)return;
  try{const result=await deviceRequest('/my-devices');pairedDevices=result.devices||[];
@@ -201,7 +219,7 @@ async function loadDevices(){
 }
 async function syncDevices(){
  if(!user||!pairedDevices.length||!DEVICE_API_URL)return;
- try{await deviceRequest('/sync','POST',{products:tracked.map(id=>({name:productById(id).name,exp:productById(id).exp}))});}
+ try{await deviceRequest('/sync','POST',{products:tracked.map(id=>({id,name:productById(id).name,exp:productById(id).exp}))});}
  catch(e){$('pairStatus').textContent='Sync failed: '+e.message}
 }
 $('pairBtn').onclick=async()=>{
@@ -213,7 +231,7 @@ $('pairBtn').onclick=async()=>{
  finally{$('pairBtn').disabled=false}
 };
 // Refresh the snapshot when the user returns to the site.
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)void syncDevices()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){void syncDevices();void loadAcknowledgements()}});
 
 // Phone notifications use FCM. The server sends daily even when this page is closed.
 async function syncPushProducts(){
@@ -245,3 +263,6 @@ $('enablePush').onclick=setupPush;
 if(/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.matchMedia('(display-mode: standalone)').matches){
  $('pushStatus').textContent='On iPhone: Share → Add to Home Screen, then open SmartExpiry from its icon before enabling notifications.';
 }
+
+// Notification click deep links to the Expired list where Acknowledge is available.
+if(new URLSearchParams(location.search).has('ack')){filter='expired';}
