@@ -10,6 +10,7 @@ const $=id=>document.getElementById(id);
 const configured=!!(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
 let auth,db,user=null,unsubscribe=null,tracked=[],products={},filter='all',current=null;
 let pairedDevices=[];
+let pendingProduct=null;
 let firebaseApp=null;
 let messaging=null;
 let qrScanner=null,scannerBusy=false,scannerDone=false,qrLibraryPromise=null;
@@ -18,7 +19,7 @@ const validQrProduct=!!catalog[urlProduct];
 // Preserve QR link before showList clears the query string.
 const incomingQRLink = new URLSearchParams(location.search).has('data') || (new URLSearchParams(location.search).has('name') && new URLSearchParams(location.search).has('exp')) ? location.href : null;
 let incomingQRHandled = false;
-const productById=id=>products[id]||catalog[id];
+const productById=id=>(pendingProduct&&pendingProduct.id===id?pendingProduct:products[id]||catalog[id]);
 const escapeHTML=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function notice(msg){$('notice').hidden=!msg;$('notice').textContent=msg||''}
 function daysLeft(exp){const d=new Date(exp+'T00:00:00');const n=new Date(),t=new Date(n.getFullYear(),n.getMonth(),n.getDate());return Math.round((d-t)/86400000)}
@@ -26,17 +27,17 @@ function state(p){const d=daysLeft(p.exp);return {d,type:d<0?'expired':d<=3?'soo
 function todayISO(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`}
 function fmt(s){return new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
 function render(){const items=tracked.map(id=>productById(id)).filter(Boolean);$('count').textContent=items.length;const counts={all:items.length,fresh:0,soon:0,expired:0};items.forEach(p=>counts[state(p).type]++);document.querySelectorAll('[data-filter]').forEach(b=>{const k=b.dataset.filter;b.textContent=`${k==='all'?'All':k==='soon'?'Soon':k[0].toUpperCase()+k.slice(1)} ${counts[k]}`;b.classList.toggle('selected',filter===k)});const expired=items.filter(p=>state(p).type==='expired');$('alert').hidden=!expired.length;$('alert').textContent=expired.length?`${expired.map(p=>p.name).join(', ')} expired. Check your paired M5 for alerts.`:'';const list=$('products');list.replaceChildren();const shown=items.filter(p=>filter==='all'||state(p).type===filter);if(!shown.length){list.innerHTML=items.length===0?'<div class="emptyState"><div class="emptyIcon">📦</div><h2>No products yet</h2><p>Scan a SmartExpiry QR code to add a product automatically.</p></div>':'<p class="empty">No products in this category.</p>';return}shown.forEach(p=>{const s=state(p),row=document.createElement('div');row.className='item';const open=document.createElement('button');open.className='productOpen';open.innerHTML=`<div class="emoji">${escapeHTML(p.emoji)}</div><div><div class="name">${escapeHTML(p.name)}</div><div class="exp">EXP ${escapeHTML(fmt(p.exp))}</div></div><div class="itemMeta"><span class="pill ${s.type}">${s.label}</span><div class="daysText">${s.days}</div></div>`;open.onclick=()=>showDetail(p.id);const del=document.createElement('button');del.className='remove';del.textContent='🗑';del.title=`Remove ${p.name}`;del.setAttribute('aria-label',del.title);del.onclick=async()=>{if(!confirm(`Remove ${p.name} from My Products?`))return;try{await deleteDoc(doc(db,'users',user.uid,'products',p.id))}catch(e){notice('Remove failed: '+e.message)}};row.append(open,del);list.append(row)})}
-function showList(){closeScanner();current=null;$('listPage').hidden=false;$('detailPage').hidden=true;history.replaceState(null,'',location.pathname);$('scanDock').hidden=!user;render()}
+function showList(){pendingProduct=null;closeScanner();current=null;$('listPage').hidden=false;$('detailPage').hidden=true;history.replaceState(null,'',location.pathname);$('scanDock').hidden=!user;render()}
 function showDetail(id){const p=productById(id);if(!p)return;closeScanner();$('scanDock').hidden=true;current=id;$('listPage').hidden=true;$('detailPage').hidden=false;$('detailEmoji').textContent=p.emoji;$('detailName').textContent=p.name;$('detailCategory').textContent=p.category;$('detailMfg').textContent=fmt(p.mfg);$('detailExp').textContent=fmt(p.exp);$('todayDate').textContent=fmt(todayISO());const s=state(p);$('detailDays').textContent=Math.abs(s.d);$('detailUnit').textContent=s.d<0?'days past expiry':s.d===0?'expires today':'days remaining';$('detailStatus').textContent=s.label.toUpperCase();$('detailStatus').className=`pill ${s.type}`;$('statusBox').style.background=s.type==='fresh'?'#e4f3e9':s.type==='soon'?'#fff2d4':'#fae5e3';$('addBtn').textContent=tracked.includes(id)?'Already Added ✓':'Add to My Products';$('addBtn').disabled=tracked.includes(id)}
-$('addBtn').onclick=async()=>{if(!current||!user)return;const id=current,p=productById(id);$('addBtn').disabled=true;try{await setDoc(doc(db,'users',user.uid,'products',id),{productId:id,name:p.name,emoji:p.emoji,mfg:p.mfg,exp:p.exp,addedAt:serverTimestamp()});showList()}catch(e){notice('Could not save product: '+e.message);$('addBtn').disabled=false}};
+$('addBtn').onclick=async()=>{if(!current||!user)return;const id=current,p=productById(id);if(!p)return;$('addBtn').disabled=true;try{await setDoc(doc(db,'users',user.uid,'products',id),{productId:id,name:p.name,emoji:p.emoji,category:p.category||'Scanned product',mfg:p.mfg,exp:p.exp,addedAt:serverTimestamp()});pendingProduct=null;showList();notice(p.name+' added to My Products ✓')}catch(e){notice('Could not save product: '+e.message);$('addBtn').disabled=false}};
 $('backBtn').onclick=showList;$('nav').onclick=showList;document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;render()});
 function showAuth(){user=null;tracked=[];products={};pairedDevices=[];
 $('loginHeading').textContent=validQrProduct?'Sign in to track '+catalog[urlProduct].name:'Welcome to SmartExpiry';
 $('loginDescription').textContent=validQrProduct?'Your QR code is ready. Continue with Google to view the product and choose whether to add it.':'New here? Continue with Google to register automatically. Returning users can sign in with the same Google account.';
 $('loginBtn').textContent='Continue with Google';$('loginPage').hidden=false;$('scanDock').hidden=true;$('listPage').hidden=true;$('detailPage').hidden=true;$('accountBar').hidden=true;$('count').textContent='0';$('nav').hidden=true}
 function showSignedIn(u){user=u;void loadDevices();$('loginPage').hidden=true;$('accountBar').hidden=false;$('accountName').textContent=u.displayName||u.email||'Signed in';$('nav').hidden=false;notice('');if(validQrProduct && !incomingQRLink)showDetail(urlProduct);else showList();
-if(incomingQRLink && !incomingQRHandled){incomingQRHandled=true;void saveScannedQR(incomingQRLink).catch(e=>notice('Could not add QR product: '+e.message));}
-unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data();const base=catalog[d.id]||{};if(typeof v.name==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v.exp||'')){products[d.id]={...base,...v,id:d.id}}else if(catalog[d.id])products[d.id]=catalog[d.id]});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
+if(incomingQRLink && !incomingQRHandled){incomingQRHandled=true;void previewScannedQR(incomingQRLink).catch(e=>notice('Could not open QR product: '+e.message));}
+unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data()||{};const base=catalog[d.id]||{};const merged={...base,...v,id:d.id};if(typeof merged.name==='string'&&validDate(merged.exp)){merged.mfg=validDate(merged.mfg)?merged.mfg:merged.exp;merged.emoji=merged.emoji||'📦';products[d.id]=merged}});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
 
 // QR can carry a complete product record; legacy catalog QR IDs remain supported.
 function validDate(v){
@@ -64,21 +65,18 @@ function parseDynamicQR(raw){
  for(let i=0;i<key.length;i++){hash^=key.charCodeAt(i);hash=Math.imul(hash,16777619)}
  return {id:'qr-'+(hash>>>0).toString(16).padStart(8,'0'),name,exp:data.exp,mfg,emoji,category};
 }
-async function saveScannedQR(decoded){
+async function previewScannedQR(decoded){
  if(!user)throw new Error('Sign in first');
  const dynamic=parseDynamicQR(String(decoded||'').trim());
- if(dynamic){
-  await setDoc(doc(db,'users',user.uid,'products',dynamic.id),{productId:dynamic.id,name:dynamic.name,emoji:dynamic.emoji,category:dynamic.category,mfg:dynamic.mfg,exp:dynamic.exp,addedAt:serverTimestamp()});
-  showList();notice(dynamic.name+' added to My Products ✓');return true;
- }
- const legacy=qrProduct(decoded);
- if(legacy){
-  const p=catalog[legacy];
-  await setDoc(doc(db,'users',user.uid,'products',legacy),{productId:legacy,name:p.name,emoji:p.emoji,category:p.category,mfg:p.mfg,exp:p.exp,addedAt:serverTimestamp()});
-  showList();notice(p.name+' added to My Products ✓');return true;
- }
- return false;
+ const legacy=dynamic?null:qrProduct(decoded);
+ const p=dynamic||(legacy?catalog[legacy]:null);
+ if(!p)return false;
+ // Preview only. Never save to Firestore without pressing Add to My Products.
+ pendingProduct=p;
+ showDetail(p.id);
+ return true;
 }
+
 function loadQrLibrary(){
  if(!qrLibraryPromise)qrLibraryPromise=new Promise((resolve,reject)=>{
   if(window.Html5Qrcode){resolve(window.Html5Qrcode);return}
@@ -125,8 +123,8 @@ async function foundQr(decoded,session){
  if(scannerDone||session!==scannerSession)return;
  scannerDone=true;
  try{
-  const saved=await saveScannedQR(decoded);
-  if(!saved){scannerDone=false;qrUnrecognized(decoded)}
+  const previewed=await previewScannedQR(decoded);
+  if(!previewed){scannerDone=false;qrUnrecognized(decoded)}
  }catch(e){scannerDone=false;$('scanStatus').textContent='Could not save product: '+e.message}
 }
 async function startScanner(){
@@ -160,8 +158,8 @@ $('qrFile').addEventListener('change',async e=>{
   await closeScanner();$('scannerOverlay').hidden=false;
   const reader=new Scanner('qrReader');qrScanner=reader;
   const decoded=await reader.scanFile(file,true);
-  const saved=await saveScannedQR(decoded);
-  if(!saved)qrUnrecognized(decoded);
+  const previewed=await previewScannedQR(decoded);
+  if(!previewed)qrUnrecognized(decoded);
  }catch(err){$('scanStatus').textContent='Could not read/save QR photo: '+(err?.message||err)}
  finally{e.target.value=''}
 });
