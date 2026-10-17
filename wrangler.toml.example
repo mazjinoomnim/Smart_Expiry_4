@@ -1,0 +1,8 @@
+name = "smart-expiry-device-api"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# Keep the existing D1 binding DB in Cloudflare.
+# Set this schedule in Worker Settings > Triggers > Cron Triggers if deploying via dashboard.
+[triggers]
+crons = ["0 1 * * *"] # 08:00 Thailand (UTC+7)
