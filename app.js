@@ -291,6 +291,17 @@ async function autoRegisterPush(){
 }
 async function setupPush(){await registerPushForAccount({askPermission:true})}
 $('enablePush').onclick=setupPush;
+$('testPush').onclick=async()=>{
+ const btn=$('testPush'),status=$('testPushStatus');
+ if(!user){status.textContent='Please sign in first.';return}
+ btn.disabled=true;status.textContent='Sending test notification…';
+ try{
+  const result=await deviceRequest('/push/test','POST',{});
+  status.textContent='Sent to '+result.sent+' registered phone'+(result.sent===1?'':'s')+'. Check your phone notifications.'+(result.failed?' ('+result.failed+' failed)':'');
+ }catch(e){status.textContent='Test failed: '+e.message}
+ finally{btn.disabled=false}
+};
+
 // iPhone/iPad Safari supports web push only for Home Screen web apps (iOS 16.4+).
 if(/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.matchMedia('(display-mode: standalone)').matches){
  $('pushStatus').textContent='On iPhone: Share → Add to Home Screen, then open SmartExpiry from its icon before enabling notifications.';
