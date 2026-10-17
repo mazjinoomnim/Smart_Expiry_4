@@ -10,17 +10,19 @@ firebase.initializeApp({
 });
 const messaging=firebase.messaging();
 messaging.onBackgroundMessage(payload=>{
- // Notification payloads are displayed by Firebase automatically.
- // Keep a fallback for any older data-only messages, avoiding duplicate banners.
- if(payload.notification)return;
+ // FCM HTTP v1 sends a data-only payload; show exactly one notification here.
  const data=payload.data||{};
- if(!data.title && !data.body)return;
- self.registration.showNotification(data.title||'SmartExpiry',{
-  body:data.body||'Check your products',icon:'./icon-192.png',
-  badge:'./icon-192.png',tag:data.tag||'smart-expiry',data:{url:'./?ack=1'}
- });
+ self.registration.showNotification(data.title||'SmartExpiry',{body:data.body||'Check your products',icon:'./icon-192.png',badge:'./icon-192.png',tag:data.tag||'smart-expiry',data:{url:'./?ack=1'+(data.productId?'&productId='+encodeURIComponent(data.productId):'')}});
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();
- event.waitUntil(clients.openWindow(new URL(event.notification.data?.url||'./?ack=1',self.registration.scope).href));
+ event.waitUntil((async()=>{
+  const url=new URL(event.notification.data?.url||'./?ack=1',self.registration.scope).href;
+  const windows=await clients.matchAll({type:'window',includeUncontrolled:true});
+  for(const client of windows){if(client.url.startsWith(self.registration.scope)){
+   if('navigate' in client)await client.navigate(url);
+   return client.focus();
+  }}
+  return clients.openWindow(url);
+ })());
 });

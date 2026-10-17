@@ -3,7 +3,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
-import { getMessaging, getToken, isSupported, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js';
+import { getMessaging, getToken, isSupported, deleteToken } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js';
 import { VAPID_PUBLIC_KEY } from './push-config.js';
 const catalog={cookie:{id:'cookie',name:'Cookie',emoji:'🍪',category:'Bakery · Store in a cool, dry place',mfg:'2026-10-15',exp:'2026-10-17'},coffee:{id:'coffee',name:'Coffee',emoji:'☕',category:'Beverage · Follow label storage instructions',mfg:'2026-10-15',exp:'2026-10-22'},yogurt:{id:'yogurt',name:'Yogurt',emoji:'🍓',category:'Dairy · Keep chilled',mfg:'2026-09-20',exp:'2026-10-11'},bread:{id:'bread',name:'Bread',emoji:'🍞',category:'Bakery · Store in a cool place',mfg:'2026-10-10',exp:'2026-10-16'},milk:{id:'milk',name:'Fresh Milk',emoji:'🥛',category:'Dairy · Keep chilled',mfg:'2026-09-25',exp:'2026-10-25'},burger:{id:'burger',name:'Hamburger',emoji:'🍔',category:'Prepared food · Keep chilled',mfg:'2026-10-14',exp:'2026-10-16'},broccoli:{id:'broccoli',name:'Broccoli',emoji:'🥦',category:'Vegetable · Keep chilled',mfg:'2026-10-14',exp:'2026-10-20'},beef:{id:'beef',name:'Beef',emoji:'🥩',category:'Raw meat · Keep refrigerated',mfg:'2026-10-14',exp:'2026-10-17'},sausage:{id:'sausage',name:'Sausage',emoji:'🌭',category:'Processed meat · Keep refrigerated',mfg:'2026-10-14',exp:'2026-10-22'},eggs:{id:'eggs',name:'Fresh Eggs',emoji:'🥚',category:'Eggs · Keep refrigerated',mfg:'2026-10-10',exp:'2026-10-24'}};
 const $=id=>document.getElementById(id);
@@ -15,7 +15,8 @@ let acknowledgeBusy=new Set();
 let pendingProduct=null;
 let firebaseApp=null;
 let messaging=null;
-let foregroundPushListenerReady=false;
+let pushRegisterGeneration=0;
+let pushRegistrationBusy=false;
 let qrScanner=null,scannerBusy=false,scannerDone=false,qrLibraryPromise=null;
 const urlProduct=(new URLSearchParams(location.search).get('product')||'').toLowerCase().trim();
 const validQrProduct=!!catalog[urlProduct];
@@ -29,7 +30,7 @@ function daysLeft(exp){const d=new Date(exp+'T00:00:00');const n=new Date(),t=ne
 function state(p){const d=daysLeft(p.exp);return {d,type:d<=0?'expired':d<=3?'soon':'fresh',label:d<=0?'Expired':d<=3?'Expiring soon':'Fresh',days:d<0?`${-d} days ago`:d===0?'Expires today':`${d} days left`}}
 function todayISO(){const n=new Date();return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`}
 function fmt(s){return new Date(s+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
-function render(){const items=tracked.map(id=>productById(id)).filter(Boolean);$('count').textContent=items.length;const counts={all:items.length,fresh:0,soon:0,expired:0};items.forEach(p=>counts[state(p).type]++);document.querySelectorAll('[data-filter]').forEach(b=>{const k=b.dataset.filter;b.textContent=`${k==='all'?'All':k==='soon'?'Soon':k[0].toUpperCase()+k.slice(1)} ${counts[k]}`;b.classList.toggle('selected',filter===k)});const expired=items.filter(p=>state(p).type==='expired');$('alert').hidden=!expired.length;$('alert').textContent=expired.length?`${expired.map(p=>p.name).join(', ')} expired. Check your paired M5 for alerts.`:'';const list=$('products');list.replaceChildren();const shown=items.filter(p=>filter==='all'||state(p).type===filter);if(!shown.length){list.innerHTML=items.length===0?'<div class="emptyState"><div class="emptyIcon">📦</div><h2>No products yet</h2><p>Scan a SmartExpiry QR code to add a product automatically.</p></div>':'<p class="empty">No products in this category.</p>';return}shown.forEach(p=>{const s=state(p),row=document.createElement('div');row.className='item';const open=document.createElement('button');open.className='productOpen';open.innerHTML=`<div class="emoji">${escapeHTML(p.emoji)}</div><div><div class="name">${escapeHTML(p.name)}</div><div class="exp">EXP ${escapeHTML(fmt(p.exp))}</div></div><div class="itemMeta"><span class="pill ${s.type}">${s.label}</span><div class="daysText">${s.days}</div></div>`;open.onclick=()=>showDetail(p.id);const del=document.createElement('button');del.className='remove';del.textContent='🗑';del.title=`Remove ${p.name}`;del.setAttribute('aria-label',del.title);del.onclick=async()=>{if(!confirm(`Remove ${p.name} from My Products?`))return;try{await deleteDoc(doc(db,'users',user.uid,'products',p.id))}catch(e){notice('Remove failed: '+e.message)}};row.append(open,del);
+function render(){const items=tracked.map(id=>productById(id)).filter(Boolean);$('count').textContent=items.length;const counts={all:items.length,fresh:0,soon:0,expired:0};items.forEach(p=>counts[state(p).type]++);document.querySelectorAll('[data-filter]').forEach(b=>{const k=b.dataset.filter;b.textContent=`${k==='all'?'All':k==='soon'?'Soon':k[0].toUpperCase()+k.slice(1)} ${counts[k]}`;b.classList.toggle('selected',filter===k)});const expired=items.filter(p=>state(p).type==='expired');$('alert').hidden=!expired.length;$('alert').textContent=expired.length?`${expired.map(p=>p.name).join(', ')} expired. Check your paired M5 for alerts.`:'';const list=$('products');list.replaceChildren();const shown=items.filter(p=>filter==='all'||state(p).type===filter);if(!shown.length){list.innerHTML=items.length===0?'<div class="emptyState"><div class="emptyIcon">📦</div><h2>No products yet</h2><p>Scan a SmartExpiry QR code to add a product automatically.</p></div>':'<p class="empty">No products in this category.</p>';return}shown.forEach(p=>{const s=state(p),row=document.createElement('div');row.className='item';row.dataset.productId=p.id;const open=document.createElement('button');open.className='productOpen';open.innerHTML=`<div class="emoji">${escapeHTML(p.emoji)}</div><div><div class="name">${escapeHTML(p.name)}</div><div class="exp">EXP ${escapeHTML(fmt(p.exp))}</div></div><div class="itemMeta"><span class="pill ${s.type}">${s.label}</span><div class="daysText">${s.days}</div></div>`;open.onclick=()=>showDetail(p.id);const del=document.createElement('button');del.className='remove';del.textContent='🗑';del.title=`Remove ${p.name}`;del.setAttribute('aria-label',del.title);del.onclick=async()=>{if(!confirm(`Remove ${p.name} from My Products?`))return;try{await deleteDoc(doc(db,'users',user.uid,'products',p.id))}catch(e){notice('Remove failed: '+e.message)}};row.append(open,del);
 if(s.type==='expired'){
  const ack=document.createElement('button');ack.type='button';ack.className='acknowledgeBtn';
  const acknowledged=acknowledgedIds.has(p.id);ack.textContent=acknowledged?'Acknowledged ✓':'Acknowledge';
@@ -42,11 +43,11 @@ function showList(){pendingProduct=null;closeScanner();current=null;$('listPage'
 function showDetail(id){const p=productById(id);if(!p)return;closeScanner();$('scanDock').hidden=true;current=id;$('listPage').hidden=true;$('detailPage').hidden=false;$('detailEmoji').textContent=p.emoji;$('detailName').textContent=p.name;$('detailCategory').textContent=p.category;$('detailMfg').textContent=fmt(p.mfg);$('detailExp').textContent=fmt(p.exp);$('todayDate').textContent=fmt(todayISO());const s=state(p);$('detailDays').textContent=Math.abs(s.d);$('detailUnit').textContent=s.d<0?'days past expiry':s.d===0?'expires today':'days remaining';$('detailStatus').textContent=s.label.toUpperCase();$('detailStatus').className=`pill ${s.type}`;$('statusBox').style.background=s.type==='fresh'?'#e4f3e9':s.type==='soon'?'#fff2d4':'#fae5e3';$('addBtn').textContent=tracked.includes(id)?'Already Added ✓':'Add to My Products';$('addBtn').disabled=tracked.includes(id)}
 $('addBtn').onclick=async()=>{if(!current||!user)return;const id=current,p=productById(id);if(!p)return;$('addBtn').disabled=true;try{await setDoc(doc(db,'users',user.uid,'products',id),{productId:id,name:p.name,emoji:p.emoji,category:p.category||'Scanned product',mfg:p.mfg,exp:p.exp,addedAt:serverTimestamp()});pendingProduct=null;showList();notice(p.name+' added to My Products ✓')}catch(e){notice('Could not save product: '+e.message);$('addBtn').disabled=false}};
 $('backBtn').onclick=showList;$('nav').onclick=showList;document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;render()});
-function showAuth(){user=null;tracked=[];products={};pairedDevices=[];acknowledgedIds=new Set();
+function showAuth(){pushRegisterGeneration++;user=null;tracked=[];products={};pairedDevices=[];acknowledgedIds=new Set();
 $('loginHeading').textContent=validQrProduct?'Sign in to track '+catalog[urlProduct].name:'Welcome to SmartExpiry';
 $('loginDescription').textContent=validQrProduct?'Your QR code is ready. Continue with Google to view the product and choose whether to add it.':'New here? Continue with Google to register automatically. Returning users can sign in with the same Google account.';
 $('loginBtn').textContent='Continue with Google';$('loginPage').hidden=false;$('scanDock').hidden=true;$('listPage').hidden=true;$('detailPage').hidden=true;$('accountBar').hidden=true;$('count').textContent='0';$('nav').hidden=true}
-function showSignedIn(u){user=u;void loadDevices();$('loginPage').hidden=true;$('accountBar').hidden=false;$('accountName').textContent=u.displayName||u.email||'Signed in';$('nav').hidden=false;notice('');if(validQrProduct && !incomingQRLink)showDetail(urlProduct);else showList();
+function showSignedIn(u){user=u;void loadDevices();void autoRegisterPush();$('loginPage').hidden=true;$('accountBar').hidden=false;$('accountName').textContent=u.displayName||u.email||'Signed in';$('nav').hidden=false;notice('');if(validQrProduct && !incomingQRLink)showDetail(urlProduct);else showList();
 if(incomingQRLink && !incomingQRHandled){incomingQRHandled=true;void previewScannedQR(incomingQRLink).catch(e=>notice('Could not open QR product: '+e.message));}
 unsubscribe=onSnapshot(collection(db,'users',u.uid,'products'),snapshot=>{products={};snapshot.docs.forEach(d=>{const v=d.data()||{};const base=catalog[d.id]||{};const merged={...base,...v,id:d.id};if(typeof merged.name==='string'&&validDate(merged.exp)){merged.mfg=validDate(merged.mfg)?merged.mfg:merged.exp;merged.emoji=merged.emoji||'📦';products[d.id]=merged}});tracked=Object.keys(products);render();void syncDevices();void syncPushProducts();void loadAcknowledgements();if(current)showDetail(current)},err=>notice('Cannot load your products: '+err.message))}
 
@@ -185,7 +186,17 @@ $('loginBtn').onclick=async()=>{
   await signInWithPopup(auth,provider);
  }catch(e){notice('Google sign-in failed: '+e.message)}
 };
-$('logoutBtn').onclick=async()=>{try{await signOut(auth)}catch(e){notice(e.message)}};
+$('logoutBtn').onclick=async()=>{try{
+ // Detach this phone's token from the old account before signing out.
+ // The same browser token can be attached to a new account on next login.
+ if(user&&typeof Notification!=='undefined'&&Notification.permission==='granted'){
+  try{const reg=await navigator.serviceWorker.getRegistration('./');if(reg&&await isSupported()){
+   const token=await getToken(getMessaging(firebaseApp),{vapidKey:VAPID_PUBLIC_KEY,serviceWorkerRegistration:reg});
+   if(token)await deviceRequest('/push/unsubscribe','POST',{token});
+  }}catch(e){console.warn('Push detach on sign-out:',e.message)}
+ }
+ await signOut(auth)
+}catch(e){notice(e.message)}};
 showAuth();$('loginHeading').textContent='Checking your account…';$('loginBtn').disabled=true;if(!configured){$('loginHeading').textContent='Welcome to SmartExpiry';$('loginBtn').disabled=false;notice('Setup needed: edit firebase-config.js, then enable Google Sign-in and Firestore in Firebase Console.')}else{try{const app=initializeApp(firebaseConfig);firebaseApp=app;auth=getAuth(app);db=getFirestore(app);onAuthStateChanged(auth,u=>{ $('loginBtn').disabled=false;if(unsubscribe){unsubscribe();unsubscribe=null}if(u)showSignedIn(u);else showAuth()},e=>{showAuth();notice('Authentication error: '+e.message)})}catch(e){notice('Firebase setup error: '+e.message)}}
 
 // Refresh the date and countdown when the page is revisited or the calendar day changes.
@@ -232,85 +243,53 @@ $('pairBtn').onclick=async()=>{
  finally{$('pairBtn').disabled=false}
 };
 // Refresh the snapshot when the user returns to the site.
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){void syncDevices();void syncPushProducts();void loadAcknowledgements()}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){void syncDevices();void loadAcknowledgements()}});
 
 // Phone notifications use FCM. The server sends daily even when this page is closed.
 async function syncPushProducts(){
  if(!user||!DEVICE_API_URL)return;
- const uid=user.uid;
- const snapshot=tracked.map(id=>({id,name:productById(id).name,exp:productById(id).exp}));
- try{
-  const result=await deviceRequest('/push/products','POST',{products:snapshot});
-  if(user?.uid===uid){
-   const status=$('pushSyncStatus');
-   if(status)status.textContent=`Cloud sync: ${result.synced} / ${snapshot.length} products`;
-  }
- }catch(e){
-  console.warn('Push product sync:',e.message);
-  const status=$('pushSyncStatus');if(status)status.textContent='Cloud sync failed: '+e.message;
- }
+ try{await deviceRequest('/push/products','POST',{products:tracked.map(id=>({id,name:productById(id).name,exp:productById(id).exp}))});}
+ catch(e){console.warn('Push product sync:',e.message)}
 }
-$('testPushBtn').onclick=async()=>{
- const btn=$('testPushBtn'),status=$('pushTestStatus');btn.disabled=true;
- status.textContent='Sending test push...';
- try{
-  await syncPushProducts();
-  const result=await deviceRequest('/push/test','POST',{});
-  status.textContent=`FCM accepted: ${result.accepted} / ${result.attempted} token(s). Lock iPhone and check notifications.`+(result.errors?.length?' Errors: '+result.errors.join(', '):'');
- }catch(e){status.textContent='Test push failed: '+e.message}
- finally{btn.disabled=false}
-};
-async function setupPush(){
+// A permission grant belongs to the installed web app, not to a Google account.
+// Reattach the existing FCM token to whichever account is currently signed in.
+async function registerPushForAccount({askPermission=false}={}){
  const status=$('pushStatus'),btn=$('enablePush');
- btn.disabled=true;
+ if(pushRegistrationBusy)return;
+ if(!user)return;
+ const uid=user.uid,generation=pushRegisterGeneration;
+ pushRegistrationBusy=true;btn.disabled=true;
  try{
   if(!('serviceWorker' in navigator)||!('Notification' in window))throw new Error('Browser does not support web notifications');
   if(!VAPID_PUBLIC_KEY||VAPID_PUBLIC_KEY.includes('PASTE_'))throw new Error('Set VAPID_PUBLIC_KEY in push-config.js first');
   if(!await isSupported())throw new Error('Firebase Messaging is not supported on this browser');
-  if(Notification.permission==='denied')throw new Error('Notifications are blocked. Enable them in browser settings');
-  const permission=await Notification.requestPermission();
-  if(permission!=='granted')throw new Error('Notification permission was not granted');
+  if(Notification.permission==='denied')throw new Error('Notifications are blocked in browser settings');
+  if(Notification.permission!=='granted'){
+   if(!askPermission){status.textContent='Tap Enable once to allow notifications on this phone.';return}
+   if(await Notification.requestPermission()!=='granted')throw new Error('Notification permission was not granted');
+  }
   const registration=await navigator.serviceWorker.register('./firebase-messaging-sw.js',{scope:'./'});
   messaging=getMessaging(firebaseApp);
-  await enableForegroundPush();
   const token=await getToken(messaging,{vapidKey:VAPID_PUBLIC_KEY,serviceWorkerRegistration:registration});
   if(!token)throw new Error('Could not get an FCM token');
+  if(!user||user.uid!==uid||generation!==pushRegisterGeneration)return;
   await deviceRequest('/push/subscribe','POST',{token});
   await syncPushProducts();
-  status.textContent='Notifications enabled on this phone ✓';
- }catch(e){status.textContent='Could not enable notifications: '+e.message;btn.disabled=false}
+  if(user?.uid===uid)status.textContent='Notifications enabled for this Google account ✓';
+ }catch(e){
+  console.warn('Push registration:',e);
+  if(user?.uid===uid)status.textContent='Could not enable notifications: '+e.message;
+ }finally{pushRegistrationBusy=false;btn.disabled=false}
 }
-// Display an OS notification when FCM arrives while SmartExpiry is open.
-// Background notifications are handled separately by firebase-messaging-sw.js.
-async function enableForegroundPush(){
- if(foregroundPushListenerReady || !firebaseApp) return;
- if(!('Notification' in window) || Notification.permission!=='granted') return;
- if(!('serviceWorker' in navigator) || !await isSupported()) return;
- const client=messaging||getMessaging(firebaseApp);
- messaging=client;
- onMessage(client,async payload=>{
-  const data=payload.data||{};
-  const title=payload.notification?.title||data.title||'SmartExpiry';
-  const body=payload.notification?.body||data.body||'Check your products';
-  try{
-   const registration=await navigator.serviceWorker.ready;
-   await registration.showNotification(title,{
-    body,
-    icon:'./icon-192.png',
-    badge:'./icon-192.png',
-    tag:data.tag||'smart-expiry-'+Date.now(),
-    data:{url:'./?ack=1'}
-   });
-  }catch(e){console.warn('Foreground notification could not be displayed:',e)}
- });
- foregroundPushListenerReady=true;
+async function autoRegisterPush(){
+ // No permission prompt on sign-in; browsers require a user gesture for first consent.
+ if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+  await registerPushForAccount();
+ }else if(typeof Notification!=='undefined'&&Notification.permission==='default'){
+  $('pushStatus').textContent='Tap Enable once to allow notifications on this phone.';
+ }
 }
-// Register the foreground listener after page reload, without asking permission again.
-if('serviceWorker' in navigator){
- window.addEventListener('load',()=>{
-  if(Notification.permission==='granted')void enableForegroundPush().catch(e=>console.warn('Foreground push setup:',e));
- });
-}
+async function setupPush(){await registerPushForAccount({askPermission:true})}
 $('enablePush').onclick=setupPush;
 // iPhone/iPad Safari supports web push only for Home Screen web apps (iOS 16.4+).
 if(/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.matchMedia('(display-mode: standalone)').matches){
@@ -318,4 +297,15 @@ if(/iPhone|iPad|iPod/.test(navigator.userAgent)&&!window.matchMedia('(display-mo
 }
 
 // Notification click deep links to the Expired list where Acknowledge is available.
-if(new URLSearchParams(location.search).has('ack')){filter='expired';}
+const ackParams=new URLSearchParams(location.search);
+if(ackParams.has('ack')){filter='expired';}
+// Notification opens the Expired list and highlights the relevant product.
+const notificationProductId=ackParams.get('productId');
+if(notificationProductId){
+ const oldRender=render;
+ render=function(){oldRender();
+  const target=[...document.querySelectorAll('.item')].find(el=>el.dataset.productId===notificationProductId);
+  if(target){target.classList.add('notificationTarget');target.scrollIntoView({block:'center',behavior:'smooth'});}
+ };
+}
+

@@ -39,3 +39,6 @@
 
 /* Acknowledge button on expired product rows */
 .acknowledgeBtn{display:block;flex:0 0 auto;border:1px solid #247647;border-radius:10px;background:#e8f5ec;color:#205d39;font-weight:700;padding:9px 12px;margin:8px;cursor:pointer}.acknowledgeBtn:disabled{opacity:.75;cursor:default}.item{flex-wrap:wrap}
+
+/* Highlight the product opened from a push notification. */
+.notificationTarget{outline:3px solid #207e50;outline-offset:3px;border-radius:12px}
