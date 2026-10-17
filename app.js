@@ -231,14 +231,34 @@ $('pairBtn').onclick=async()=>{
  finally{$('pairBtn').disabled=false}
 };
 // Refresh the snapshot when the user returns to the site.
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){void syncDevices();void loadAcknowledgements()}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){void syncDevices();void syncPushProducts();void loadAcknowledgements()}});
 
 // Phone notifications use FCM. The server sends daily even when this page is closed.
 async function syncPushProducts(){
  if(!user||!DEVICE_API_URL)return;
- try{await deviceRequest('/push/products','POST',{products:tracked.map(id=>({id,name:productById(id).name,exp:productById(id).exp}))});}
- catch(e){console.warn('Push product sync:',e.message)}
+ const uid=user.uid;
+ const snapshot=tracked.map(id=>({id,name:productById(id).name,exp:productById(id).exp}));
+ try{
+  const result=await deviceRequest('/push/products','POST',{products:snapshot});
+  if(user?.uid===uid){
+   const status=$('pushSyncStatus');
+   if(status)status.textContent=`Cloud sync: ${result.synced} / ${snapshot.length} products`;
+  }
+ }catch(e){
+  console.warn('Push product sync:',e.message);
+  const status=$('pushSyncStatus');if(status)status.textContent='Cloud sync failed: '+e.message;
+ }
 }
+$('testPushBtn').onclick=async()=>{
+ const btn=$('testPushBtn'),status=$('pushTestStatus');btn.disabled=true;
+ status.textContent='Sending test push...';
+ try{
+  await syncPushProducts();
+  const result=await deviceRequest('/push/test','POST',{});
+  status.textContent=`FCM accepted: ${result.accepted} / ${result.attempted} token(s). Lock iPhone and check notifications.`+(result.errors?.length?' Errors: '+result.errors.join(', '):'');
+ }catch(e){status.textContent='Test push failed: '+e.message}
+ finally{btn.disabled=false}
+};
 async function setupPush(){
  const status=$('pushStatus'),btn=$('enablePush');
  btn.disabled=true;

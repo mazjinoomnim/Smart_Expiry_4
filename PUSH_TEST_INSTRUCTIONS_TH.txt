@@ -1,0 +1,15 @@
+SmartExpiry V4 — ตรวจการซิงก์และทดสอบ Push จริง
+
+1. สำรองไฟล์เดิมก่อน
+2. Cloudflare Worker: Deploy worker.js จากชุดนี้ (รักษา D1 Binding และ Secrets เดิม)
+3. GitHub: อัปโหลด app.js และ index.html จากชุดนี้ (ต้องอัปเดต index.html เพื่อให้มีปุ่มใหม่และเปลี่ยน cache-busting query)
+4. เปิด SmartExpiry จากไอคอน Home Screen บน iPhone แล้วดู Cloud sync: N / N products
+5. กด Send test notification แล้วล็อกหน้าจอ iPhone ตรวจว่าแจ้งเตือนเด้งหรือไม่
+6. ดู FCM accepted: N / N; ถ้าเป็น 0 ให้ดู Cloudflare Worker Logs คำว่า FCM test delivery failed หรือ FCM auth test failed โดยห้ามส่ง token/secret มาในแชต
+
+ข้อควรรู้:
+- ปุ่มทดสอบนี้ไม่ต้องรอ Cron 08:00 และไม่บันทึกใน push_sent เพราะเป็นการทดสอบ ไม่ใช่การแจ้งเตือนสินค้า
+- accepted หมายถึง FCM รับคำขอแล้ว ยังไม่ใช่หลักฐานว่า iPhone แสดงแจ้งเตือนจริง
+- ไม่เปลี่ยนตาราง D1 และไม่แตะการจับคู่ M5
+- ระบบแจ้งเตือนหมดอายุจริงยังทำงานตามรอบ 08:00 ตามเดิม
+- No devices paired yet ต้องตรวจ owner_uid เทียบ Firebase UID แยกต่างหาก ไม่ควร Pair ใหม่โดยไม่ตรวจสอบ

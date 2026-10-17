@@ -140,6 +140,21 @@ export default {
    await env.DB.prepare('INSERT INTO push_tokens(uid,token) VALUES(?,?) ON CONFLICT(token) DO UPDATE SET uid=excluded.uid').bind(uid,token).run();
    return respond(json({subscribed:true}));
   }
+  // Authenticated manual test: send a data-only FCM notification to this user's registered tokens.
+  // Never return token values or secret credentials to the browser.
+  if(req.method==='POST'&&p==='/push/test'){
+   const uid=await authUser(req,env);if(!uid)return respond(fail('Sign in first',401));
+   const rows=await env.DB.prepare('SELECT token FROM push_tokens WHERE uid=? LIMIT 10').bind(uid).all();
+   if(!rows.results.length)return respond(fail('No push token for this account. Enable phone notifications again.',409));
+   let auth;
+   try{auth=await accessToken(env)}catch(e){console.error('FCM auth test failed:',e.message);return respond(fail('FCM authentication failed; check Worker logs',502))}
+   let accepted=0;const errors=[];
+   for(const row of rows.results){
+    try{await sendPush(auth,row.token,'SmartExpiry test notification','If you see this on your lock screen, push is working.','smart-expiry-test-'+Date.now());accepted++}
+    catch(e){console.error('FCM test delivery failed:',e.message);errors.push(String(e.message).match(/FCM \d{3}/)?.[0]||'FCM delivery error')}
+   }
+   return respond(json({attempted:rows.results.length,accepted,errors}));
+  }
   // Keep a user-specific snapshot for scheduled notifications, even without an M5 device.
   if(req.method==='POST'&&p==='/push/products'){
    const uid=await authUser(req,env);if(!uid)return respond(fail('Sign in first',401));
