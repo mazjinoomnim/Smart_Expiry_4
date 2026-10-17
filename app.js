@@ -3,7 +3,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
-import { getMessaging, getToken, isSupported, deleteToken } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js';
+import { getMessaging, getToken, isSupported, deleteToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js';
 import { VAPID_PUBLIC_KEY } from './push-config.js';
 const catalog={cookie:{id:'cookie',name:'Cookie',emoji:'🍪',category:'Bakery · Store in a cool, dry place',mfg:'2026-10-15',exp:'2026-10-17'},coffee:{id:'coffee',name:'Coffee',emoji:'☕',category:'Beverage · Follow label storage instructions',mfg:'2026-10-15',exp:'2026-10-22'},yogurt:{id:'yogurt',name:'Yogurt',emoji:'🍓',category:'Dairy · Keep chilled',mfg:'2026-09-20',exp:'2026-10-11'},bread:{id:'bread',name:'Bread',emoji:'🍞',category:'Bakery · Store in a cool place',mfg:'2026-10-10',exp:'2026-10-16'},milk:{id:'milk',name:'Fresh Milk',emoji:'🥛',category:'Dairy · Keep chilled',mfg:'2026-09-25',exp:'2026-10-25'},burger:{id:'burger',name:'Hamburger',emoji:'🍔',category:'Prepared food · Keep chilled',mfg:'2026-10-14',exp:'2026-10-16'},broccoli:{id:'broccoli',name:'Broccoli',emoji:'🥦',category:'Vegetable · Keep chilled',mfg:'2026-10-14',exp:'2026-10-20'},beef:{id:'beef',name:'Beef',emoji:'🥩',category:'Raw meat · Keep refrigerated',mfg:'2026-10-14',exp:'2026-10-17'},sausage:{id:'sausage',name:'Sausage',emoji:'🌭',category:'Processed meat · Keep refrigerated',mfg:'2026-10-14',exp:'2026-10-22'},eggs:{id:'eggs',name:'Fresh Eggs',emoji:'🥚',category:'Eggs · Keep refrigerated',mfg:'2026-10-10',exp:'2026-10-24'}};
 const $=id=>document.getElementById(id);
@@ -15,6 +15,7 @@ let acknowledgeBusy=new Set();
 let pendingProduct=null;
 let firebaseApp=null;
 let messaging=null;
+let foregroundPushListenerReady=false;
 let qrScanner=null,scannerBusy=false,scannerDone=false,qrLibraryPromise=null;
 const urlProduct=(new URLSearchParams(location.search).get('product')||'').toLowerCase().trim();
 const validQrProduct=!!catalog[urlProduct];
@@ -271,12 +272,44 @@ async function setupPush(){
   if(permission!=='granted')throw new Error('Notification permission was not granted');
   const registration=await navigator.serviceWorker.register('./firebase-messaging-sw.js',{scope:'./'});
   messaging=getMessaging(firebaseApp);
+  await enableForegroundPush();
   const token=await getToken(messaging,{vapidKey:VAPID_PUBLIC_KEY,serviceWorkerRegistration:registration});
   if(!token)throw new Error('Could not get an FCM token');
   await deviceRequest('/push/subscribe','POST',{token});
   await syncPushProducts();
   status.textContent='Notifications enabled on this phone ✓';
  }catch(e){status.textContent='Could not enable notifications: '+e.message;btn.disabled=false}
+}
+// Display an OS notification when FCM arrives while SmartExpiry is open.
+// Background notifications are handled separately by firebase-messaging-sw.js.
+async function enableForegroundPush(){
+ if(foregroundPushListenerReady || !firebaseApp) return;
+ if(!('Notification' in window) || Notification.permission!=='granted') return;
+ if(!('serviceWorker' in navigator) || !await isSupported()) return;
+ const client=messaging||getMessaging(firebaseApp);
+ messaging=client;
+ onMessage(client,async payload=>{
+  const data=payload.data||{};
+  const title=payload.notification?.title||data.title||'SmartExpiry';
+  const body=payload.notification?.body||data.body||'Check your products';
+  try{
+   const registration=await navigator.serviceWorker.ready;
+   await registration.showNotification(title,{
+    body,
+    icon:'./icon-192.png',
+    badge:'./icon-192.png',
+    tag:data.tag||'smart-expiry-'+Date.now(),
+    data:{url:'./?ack=1'}
+   });
+  }catch(e){console.warn('Foreground notification could not be displayed:',e)}
+ });
+ foregroundPushListenerReady=true;
+}
+// Register the foreground listener after page reload, without asking permission again.
+if('serviceWorker' in navigator){
+ window.addEventListener('load',()=>{
+  if(Notification.permission==='granted')void enableForegroundPush().catch(e=>console.warn('Foreground push setup:',e));
+ });
 }
 $('enablePush').onclick=setupPush;
 // iPhone/iPad Safari supports web push only for Home Screen web apps (iOS 16.4+).
