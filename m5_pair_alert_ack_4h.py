@@ -7,8 +7,8 @@ import os
 import ujson
 import urequests
 
-WIFI_NAME = 'YOUR_WIFI_NAME'
-WIFI_PASSWORD = 'YOUR_WIFI_PASSWORD'
+WIFI_NAME = 'Hi haiii'
+WIFI_PASSWORD = '0935537166'
 WORKER_URL = 'https://smart-expiry-device-api.manatsawee-a.workers.dev'
 
 M5.begin()
@@ -20,7 +20,7 @@ M5.Lcd.drawString('SmartExpiry', 10, 12)
 wifi = network.WLAN(network.STA_IF)
 wifi.active(True)
 if not wifi.isconnected():
-    wifi.connect(WIFI_NAME, WIFI_PASSWORD)
+    wifi.connect(Hi haiii, 0935537166)
     for _ in range(25):
         if wifi.isconnected():
             break
