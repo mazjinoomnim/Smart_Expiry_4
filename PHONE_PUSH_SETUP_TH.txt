@@ -1,0 +1,10 @@
+SmartExpiry V4 — Phone Push setup
+
+1. Back up your current Cloudflare Worker code. Replace it with worker.js from this ZIP and Deploy. Existing M5 endpoints remain intact.
+2. In Cloudflare D1 Console for smart-expiry-devices, execute SQL in PHONE_PUSH_TABLES.sql. This file uses push_tokens, push_products and push_sent (NOT push_notification_log).
+3. Confirm Worker Secret FCM_SERVICE_ACCOUNT_JSON and FIREBASE_WEB_API_KEY and D1 binding DB exist. Never upload the service account JSON to GitHub.
+4. Cloudflare Worker > Settings > Triggers > Cron Triggers: 0 1 * * * (08:00 Thailand). Cron triggers are configured on Cloudflare, not by uploading wrangler.toml.example to GitHub.
+5. Upload only app.js and index.html to GitHub if necessary; in this ZIP they are preserved unchanged from your uploaded V4. Your current VAPID key and firebase-messaging-sw.js are preserved.
+6. On iPhone iOS 16.4+, use Safari > Share > Add to Home Screen, open the installed web app, sign in, and tap Enable phone notifications.
+7. Wait for daily schedule; successful token registration is not proof of notification delivery. Inspect Cloudflare logs for errors.
+IMPORTANT: If you previously created push_tokens with created_at and push_notification_log, push_tokens remains compatible, but you still need push_products and push_sent.

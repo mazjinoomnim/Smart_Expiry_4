@@ -114,6 +114,27 @@ export default {
    await env.DB.prepare('UPDATE devices SET products_json=? WHERE owner_uid=?').bind(JSON.stringify(products),uid).run();
    return respond(json({synced:products.length}));
   }
+  // Register a phone's Firebase Cloud Messaging token for the signed-in user.
+  if(req.method==='POST'&&p==='/push/subscribe'){
+   const uid=await authUser(req,env);if(!uid)return respond(fail('Sign in first',401));
+   const data=await req.json();const token=String(data.token||'');
+   if(!token||token.length>4096)return respond(fail('Invalid FCM token'));
+   await env.DB.prepare('INSERT INTO push_tokens(uid,token) VALUES(?,?) ON CONFLICT(token) DO UPDATE SET uid=excluded.uid').bind(uid,token).run();
+   return respond(json({subscribed:true}));
+  }
+  // Keep a user-specific snapshot for scheduled notifications, even without an M5 device.
+  if(req.method==='POST'&&p==='/push/products'){
+   const uid=await authUser(req,env);if(!uid)return respond(fail('Sign in first',401));
+   const data=await req.json(),items=data.products;
+   if(!Array.isArray(items)||items.length>100)return respond(fail('Invalid product list'));
+   const products=[];
+   for(const item of items){
+    if(typeof item.id!=='string'||!item.id||item.id.length>150||typeof item.name!=='string'||!item.name||item.name.length>80||typeof item.exp!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(item.exp)||!Number.isFinite(dayNumber(item.exp)))return respond(fail('Invalid product'));
+    products.push({id:item.id,name:item.name,exp:item.exp});
+   }
+   await env.DB.prepare('INSERT INTO push_products(uid,products_json) VALUES(?,?) ON CONFLICT(uid) DO UPDATE SET products_json=excluded.products_json').bind(uid,JSON.stringify(products)).run();
+   return respond(json({synced:products.length}));
+  }
   if(req.method==='GET'&&p==='/device/alerts'){
    const d=await getDevice(req,env);if(!d)return respond(fail('Invalid device credentials',401));
    if(!d.owner_uid)return respond(json({paired:false,alerts:[]}));
