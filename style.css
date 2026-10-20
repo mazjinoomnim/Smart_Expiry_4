@@ -42,3 +42,86 @@
 
 /* Highlight the product opened from a push notification. */
 .notificationTarget{outline:3px solid #207e50;outline-offset:3px;border-radius:12px}
+
+
+/* SmartExpiry V4 — mobile-safe product cards. Presentation UI update. */
+#products .item{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 38px;
+  align-items:start;
+  column-gap:10px;
+  row-gap:12px;
+  padding:14px;
+  border:1px solid #eee5ec;
+  border-radius:18px;
+  flex-wrap:initial;
+  min-width:0;
+}
+#products .productOpen{
+  display:grid;
+  grid-template-columns:54px minmax(0,1fr);
+  grid-template-areas:"emoji info" "meta meta";
+  gap:8px 12px;
+  width:100%;
+  min-width:0;
+  align-items:center;
+}
+#products .productOpen .emoji{
+  grid-area:emoji;
+  width:54px;
+  height:54px;
+  font-size:30px;
+}
+#products .productInfo{grid-area:info;min-width:0;overflow-wrap:anywhere}
+#products .productInfo .name{font-size:16px;line-height:1.35}
+#products .productInfo .exp{line-height:1.4}
+#products .itemMeta{
+  grid-area:meta;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin:0;
+  padding-top:9px;
+  border-top:1px solid #f0eaf0;
+  text-align:left;
+  white-space:normal;
+}
+#products .itemMeta .pill{flex:0 0 auto;white-space:nowrap}
+#products .itemMeta .daysText{margin:0;text-align:right;min-width:0}
+#products .remove{
+  grid-column:2;
+  grid-row:1;
+  display:grid;
+  place-items:center;
+  width:38px;
+  height:38px;
+  margin:0;
+  padding:0;
+  font-size:18px;
+}
+#products .acknowledgeBtn{
+  grid-column:1/-1;
+  width:100%;
+  min-height:43px;
+  margin:0;
+  padding:11px 14px;
+  border-radius:12px;
+  text-align:center;
+  font-size:13px;
+  line-height:1.35;
+  white-space:normal;
+}
+#products .acknowledgeBtn:disabled{
+  background:#e8f5ec;
+  color:#205d39;
+  opacity:1;
+}
+#products .item:has(.acknowledgeBtn){border-color:#f1d5d5}
+@media(max-width:370px){
+  #products .item{padding:11px;column-gap:7px}
+  #products .productOpen{grid-template-columns:46px minmax(0,1fr);gap:8px}
+  #products .productOpen .emoji{width:46px;height:46px;font-size:26px}
+  #products .productInfo .name{font-size:14px}
+  #products .itemMeta .daysText{font-size:11px}
+}
